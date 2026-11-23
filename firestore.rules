@@ -1,0 +1,275 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Pillar 1 / Global Safety Net: Default-Deny Catch-All
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Core Primitives
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isVerifiedUser() && (
+        request.auth.token.email == 'aethexflow@gmail.com' ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isValidGraph(graph) {
+      return graph is map &&
+        graph.keys().hasAll(['nodes', 'edges']) &&
+        graph.keys().hasOnly(['nodes', 'edges']) &&
+        graph.nodes is list &&
+        graph.nodes.size() <= 40 &&
+        (graph.nodes.size() == 0 || graph.nodes[0] is map) &&
+        graph.edges is list &&
+        graph.edges.size() <= 80 &&
+        (graph.edges.size() == 0 || graph.edges[0] is map);
+    }
+
+    function isValidTagList(tags) {
+      return tags is list &&
+        tags.size() <= 8 &&
+        (tags.size() == 0 || (tags[0] is string && tags[0].size() <= 24));
+    }
+
+    function isValidSamplePayload(samplePayload) {
+      return samplePayload is map && samplePayload.keys().size() <= 32;
+    }
+
+    // Entity Validators (Anti-Update-Gap)
+    function isValidUserProfile(data, userId) {
+      return data.keys().hasAll(['uid', 'displayName', 'role', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['uid', 'displayName', 'photoURL', 'role', 'createdAt', 'updatedAt']) &&
+        data.uid is string && data.uid.size() <= 128 && data.uid == userId &&
+        data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 100 &&
+        (!('photoURL' in data) || (data.photoURL is string && data.photoURL.size() <= 500)) &&
+        data.role is string && data.role in ['member', 'operator'] &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidUserPrivateInfo(data, userId) {
+      return data.keys().hasAll(['uid', 'email', 'updatedAt']) &&
+        data.keys().hasOnly(['uid', 'email', 'updatedAt']) &&
+        data.uid is string && data.uid.size() <= 128 && data.uid == userId &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 254 &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidChatMessage(data, userId, messageId) {
+      return data.keys().hasAll(['id', 'uid', 'role', 'content', 'createdAt']) &&
+        data.keys().hasOnly(['id', 'uid', 'role', 'content', 'suggestedTool', 'videoInstruction', 'engine', 'createdAt']) &&
+        data.id is string && data.id == messageId && data.id.size() <= 128 &&
+        data.uid is string && data.uid == userId && data.uid.size() <= 128 &&
+        data.role is string && data.role in ['user', 'assistant'] &&
+        data.content is string && data.content.size() >= 1 && data.content.size() <= 12000 &&
+        (!('suggestedTool' in data) || (data.suggestedTool is string && data.suggestedTool.size() <= 64)) &&
+        (!('videoInstruction' in data) || (data.videoInstruction is string && data.videoInstruction.size() <= 1000)) &&
+        (!('engine' in data) || (data.engine is string && data.engine.size() <= 64)) &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidSavedWorkflow(data, userId, workflowId) {
+      return data.keys().hasAll(['id', 'uid', 'name', 'description', 'nodesCount', 'edgesCount', 'graph', 'isPublic', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'uid', 'name', 'description', 'category', 'tags', 'nodesCount', 'edgesCount', 'graph', 'samplePayload', 'isPublic', 'createdAt', 'updatedAt']) &&
+        data.id is string && data.id == workflowId && data.id.size() <= 128 &&
+        data.uid is string && data.uid == userId && data.uid.size() <= 128 &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 120 &&
+        data.description is string && data.description.size() <= 500 &&
+        (!('category' in data) || (data.category is string && data.category.size() >= 1 && data.category.size() <= 40)) &&
+        (!('tags' in data) || isValidTagList(data.tags)) &&
+        data.nodesCount is int && data.nodesCount >= 0 && data.nodesCount <= 40 &&
+        data.edgesCount is int && data.edgesCount >= 0 && data.edgesCount <= 80 &&
+        isValidGraph(data.graph) &&
+        (!('samplePayload' in data) || isValidSamplePayload(data.samplePayload)) &&
+        data.isPublic is bool &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidPublicWorkflow(data, workflowId) {
+      return data.keys().hasAll(['id', 'authorUid', 'authorName', 'name', 'description', 'category', 'graph', 'runsCount', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'authorUid', 'authorName', 'name', 'description', 'category', 'tags', 'graph', 'samplePayload', 'runsCount', 'createdAt', 'updatedAt']) &&
+        data.id is string && data.id == workflowId && data.id.size() <= 128 &&
+        data.authorUid is string && data.authorUid.size() >= 1 && data.authorUid.size() <= 128 &&
+        data.authorName is string && data.authorName.size() >= 1 && data.authorName.size() <= 100 &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 120 &&
+        data.description is string && data.description.size() <= 500 &&
+        data.category is string && data.category.size() >= 1 && data.category.size() <= 40 &&
+        (!('tags' in data) || isValidTagList(data.tags)) &&
+        isValidGraph(data.graph) &&
+        (!('samplePayload' in data) || isValidSamplePayload(data.samplePayload)) &&
+        data.runsCount is int && data.runsCount >= 0 && data.runsCount <= 10000000 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidActivityRecord(data, userId, activityId) {
+      return data.keys().hasAll(['id', 'uid', 'action', 'status', 'createdAt']) &&
+        data.keys().hasOnly(['id', 'uid', 'action', 'status', 'createdAt']) &&
+        data.id is string && data.id == activityId && data.id.size() <= 128 &&
+        data.uid is string && data.uid == userId && data.uid.size() <= 128 &&
+        data.action is string && data.action.size() >= 1 && data.action.size() <= 300 &&
+        data.status is string && data.status.size() >= 1 && data.status.size() <= 40 &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidWorkspacePreference(data, userId) {
+      return data.keys().hasAll(['uid', 'theme', 'pinnedToolIds', 'density', 'updatedAt']) &&
+        data.keys().hasOnly(['uid', 'theme', 'pinnedToolIds', 'density', 'updatedAt']) &&
+        data.uid is string && data.uid == userId && data.uid.size() <= 128 &&
+        data.theme is string && data.theme in ['dark', 'light'] &&
+        data.pinnedToolIds is list && data.pinnedToolIds.size() <= 20 &&
+        (data.pinnedToolIds.size() == 0 || data.pinnedToolIds[0] is string) &&
+        data.density is string && data.density in ['comfortable', 'compact'] &&
+        data.updatedAt is timestamp;
+    }
+
+    // User-scoped Collections (Strictly Owner or Admin)
+    match /users/{userId} {
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow create: if isValidId(userId) && isVerifiedUser() && isOwner(userId) &&
+        isValidUserProfile(incoming(), userId) &&
+        incoming().role == 'member' &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isValidId(userId) && isVerifiedUser() &&
+        isValidUserProfile(incoming(), userId) &&
+        incoming().uid == existing().uid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          isAdmin() ||
+          (isOwner(userId) && incoming().role == existing().role &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'photoURL', 'updatedAt']))
+        );
+      allow delete: if isValidId(userId) && isAdmin();
+
+      // PII Isolated Private Subcollection
+      match /private/{docId} {
+        allow get: if isValidId(userId) && isValidId(docId) && (isOwner(userId) || isAdmin());
+        allow create: if isValidId(userId) && isValidId(docId) && docId == 'account' &&
+          isVerifiedUser() && isOwner(userId) &&
+          isValidUserPrivateInfo(incoming(), userId) &&
+          incoming().updatedAt == request.time;
+        allow update: if isValidId(userId) && isValidId(docId) && docId == 'account' &&
+          isVerifiedUser() && isOwner(userId) &&
+          isValidUserPrivateInfo(incoming(), userId) &&
+          incoming().uid == existing().uid &&
+          incoming().updatedAt == request.time &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['email', 'updatedAt']);
+      }
+
+      // Persisted AI Chat History
+      match /chats/{messageId} {
+        allow get: if isValidId(userId) && isValidId(messageId) && (isOwner(userId) || isAdmin());
+        allow list: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+        allow create: if isValidId(userId) && isValidId(messageId) &&
+          isVerifiedUser() && isOwner(userId) &&
+          isValidChatMessage(incoming(), userId, messageId) &&
+          incoming().createdAt == request.time;
+        allow delete: if isValidId(userId) && isValidId(messageId) && (isOwner(userId) || isAdmin());
+      }
+
+      // Per-user Saved Reusable DAG Workflow Templates
+      match /workflows/{workflowId} {
+        allow get: if isValidId(userId) && isValidId(workflowId) && (isOwner(userId) || isAdmin());
+        allow list: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+        allow create: if isValidId(userId) && isValidId(workflowId) &&
+          isVerifiedUser() && isOwner(userId) &&
+          isValidSavedWorkflow(incoming(), userId, workflowId) &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time;
+        allow update: if isValidId(userId) && isValidId(workflowId) &&
+          isVerifiedUser() && isOwner(userId) &&
+          isValidSavedWorkflow(incoming(), userId, workflowId) &&
+          incoming().uid == existing().uid &&
+          incoming().id == existing().id &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().updatedAt == request.time &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['name', 'description', 'category', 'tags', 'nodesCount', 'edgesCount', 'graph', 'samplePayload', 'isPublic', 'updatedAt']);
+        allow delete: if isValidId(userId) && isValidId(workflowId) && (isOwner(userId) || isAdmin());
+      }
+
+      // Per-user Activity History
+      match /activities/{activityId} {
+        allow get: if isValidId(userId) && isValidId(activityId) && (isOwner(userId) || isAdmin());
+        allow list: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+        allow create: if isValidId(userId) && isValidId(activityId) &&
+          isVerifiedUser() && isOwner(userId) &&
+          isValidActivityRecord(incoming(), userId, activityId) &&
+          incoming().createdAt == request.time;
+        allow delete: if isValidId(userId) && isValidId(activityId) && (isOwner(userId) || isAdmin());
+      }
+
+      // Per-user Workspace Preferences
+      match /preferences/{prefId} {
+        allow get: if isValidId(userId) && isValidId(prefId) && (isOwner(userId) || isAdmin());
+        allow create: if isValidId(userId) && isValidId(prefId) && prefId == 'workspace' &&
+          isVerifiedUser() && isOwner(userId) &&
+          isValidWorkspacePreference(incoming(), userId) &&
+          incoming().updatedAt == request.time;
+        allow update: if isValidId(userId) && isValidId(prefId) && prefId == 'workspace' &&
+          isVerifiedUser() && isOwner(userId) &&
+          isValidWorkspacePreference(incoming(), userId) &&
+          incoming().uid == existing().uid &&
+          incoming().updatedAt == request.time &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['theme', 'pinnedToolIds', 'density', 'updatedAt']);
+      }
+    }
+
+    // Public Community Reusable Workflow Templates (Shared across all users; Zero PII)
+    match /publicWorkflows/{workflowId} {
+      allow get: if isValidId(workflowId);
+      allow list: if resource.data.runsCount >= 0;
+      allow create: if isValidId(workflowId) && isVerifiedUser() &&
+        isValidPublicWorkflow(incoming(), workflowId) &&
+        incoming().authorUid == request.auth.uid &&
+        incoming().runsCount == 0 &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isValidId(workflowId) && isVerifiedUser() &&
+        isValidPublicWorkflow(incoming(), workflowId) &&
+        incoming().id == existing().id &&
+        incoming().authorUid == existing().authorUid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          isAdmin() ||
+          (existing().authorUid == request.auth.uid &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['name', 'description', 'category', 'tags', 'graph', 'samplePayload', 'updatedAt'])) ||
+          (incoming().diff(existing()).affectedKeys().hasOnly(['runsCount', 'updatedAt']) &&
+            incoming().runsCount == existing().runsCount + 1)
+        );
+      allow delete: if isValidId(workflowId) && isVerifiedUser() &&
+        (existing().authorUid == request.auth.uid || isAdmin());
+    }
+
+    // Admins Registry (Read-only for verified user self-check; managed via Firebase Console)
+    match /admins/{adminUid} {
+      allow get: if isValidId(adminUid) && isVerifiedUser() && request.auth.uid == adminUid;
+    }
+  }
+}

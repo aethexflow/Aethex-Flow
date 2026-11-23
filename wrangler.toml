@@ -1,0 +1,23 @@
+name = "aethexflow-studio"
+compatibility_date = "2026-11-01"
+pages_build_output_dir = "./dist"
+
+[vars]
+APP_ENV = "production"
+APP_VERSION = "4.2.0-cloudflare"
+TARGET_DOMAIN = "aethexflow.online"
+CLOUDFLARED_LOCAL_GATEWAY = "http://127.0.1.1:251"
+
+# Production Secrets (bind via Cloudflare Pages dashboard or `wrangler pages secret put`):
+# - GEMINI_API_KEY
+# - ADMIN_GATEWAY_TOKEN
+# - ANTHROPIC_API_KEY (optional multi-model admin routing)
+# - OPENAI_API_KEY (optional multi-model admin routing)
+# - XAI_API_KEY (optional multi-model admin routing)
+# - CLOUDFLARED_TUNNEL_URL (e.g. https://tunnel.aethexflow.online)
+
+# Bind your Cloudflare D1 database for site updates & audit logs:
+# [[d1_databases]]
+# binding = "DB"
+# database_name = "aethexflow_admin_db"
+# database_id = "YOUR_D1_DATABASE_ID"

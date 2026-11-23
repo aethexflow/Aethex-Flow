@@ -1,0 +1,6 @@
+{
+  "name": "AethexFlow - Intelligence Workspace",
+  "description": "Ultra-secure, lightweight AI automation ecosystem with local tools, dubbing player, DAG workflow engine, and biometric hardware vault.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
