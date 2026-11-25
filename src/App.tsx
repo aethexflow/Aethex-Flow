@@ -13,6 +13,7 @@ import { AIChatAssistant, ExecutedChatAction } from './components/AIChatAssistan
 import { BotRentalCreator } from './components/BotRentalCreator';
 import { MasterControlDashboard } from './components/MasterControlDashboard';
 import { AdminGatewayChat } from './components/AdminGatewayChat';
+import { AethiHubDashboard } from './components/AethiHubDashboard';
 import { CommandPaletteModal } from './components/CommandPaletteModal';
 import { BackgroundRemoverModal } from './components/BackgroundRemoverModal';
 import { PdfCompressorModal } from './components/PdfCompressorModal';
@@ -20,6 +21,8 @@ import { ImageConverterModal } from './components/ImageConverterModal';
 import { TextTranslatorModal } from './components/TextTranslatorModal';
 import { CryptoVaultModal } from './components/CryptoVaultModal';
 import { DataFormatterModal } from './components/DataFormatterModal';
+import { RegexMatcherModal } from './components/RegexMatcherModal';
+import { AdvancedTaskWorkflowModal } from './components/AdvancedTaskWorkflowModal';
 import { WorkflowDagVisualizer } from './components/WorkflowDagVisualizer';
 import { INITIAL_TOOLS, ToolItem } from './utils/toolsData';
 import { useAuth } from './contexts/AuthContext';
@@ -108,6 +111,7 @@ export default function App() {
   const [pendingVideoInstruction, setPendingVideoInstruction] = useState<string | null>(null);
   const [pendingChatPrompt, setPendingChatPrompt] = useState<string | null>(null);
   const [pendingWorkflowPreset, setPendingWorkflowPreset] = useState<string | null>(null);
+  const [isD1WorkflowsOpen, setIsD1WorkflowsOpen] = useState<boolean>(false);
 
   const isDark = theme === 'dark';
 
@@ -582,6 +586,14 @@ export default function App() {
                 />
               )}
 
+              {activeTab === 'aethi-hub' && (
+                <AethiHubDashboard
+                  theme={theme}
+                  onLogActivity={logActivity}
+                  onOpenD1Workflows={() => setIsD1WorkflowsOpen(true)}
+                />
+              )}
+
               {activeTab === 'settings' && (
                 <SettingsAndSecurity
                   theme={theme}
@@ -656,6 +668,20 @@ export default function App() {
       <DataFormatterModal
         isOpen={activeModal === 'data-formatter'}
         onClose={() => setActiveModal(null)}
+        theme={theme}
+        onLogActivity={logActivity}
+      />
+
+      <RegexMatcherModal
+        isOpen={activeModal === 'regex-matcher'}
+        onClose={() => setActiveModal(null)}
+        theme={theme}
+        onLogActivity={logActivity}
+      />
+
+      <AdvancedTaskWorkflowModal
+        isOpen={isD1WorkflowsOpen}
+        onClose={() => setIsD1WorkflowsOpen(false)}
         theme={theme}
         onLogActivity={logActivity}
       />

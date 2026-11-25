@@ -130,6 +130,19 @@ export const INITIAL_TOOLS: ToolItem[] = [
     permissions: ['Server fetch runner', 'Scheduled triggers'],
     actionKeywords: ['bot', 'monitor', 'webhook', 'digest', 'automation', 'crawler'],
   },
+  {
+    id: 'regex-matcher',
+    name: 'Regex Pattern & Matcher',
+    category: 'developer',
+    categoryLabel: 'Developer',
+    description: 'Test regular expressions, match lists, and flags client-side instantly.',
+    iconName: 'Braces',
+    isPinned: false,
+    isInstalled: true,
+    status: 'Ready',
+    permissions: ['RegExp evaluation', 'Local clipboard'],
+    actionKeywords: ['regex', 'regular expression', 'match', 'pattern', 'search text', 'validate'],
+  },
 ];
 
 export function routeNaturalCommandToTool(query: string, tools: ToolItem[]): ToolItem | null {

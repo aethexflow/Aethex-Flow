@@ -11,6 +11,7 @@ import {
   LogIn,
   LogOut,
   Cloud,
+  Bot,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -21,6 +22,7 @@ export type NavTab =
   | 'workflows'
   | 'tools'
   | 'bots'
+  | 'aethi-hub'
   | 'settings';
 
 interface SidebarProps {
@@ -61,7 +63,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         : 'hover:bg-neutral-100 text-neutral-600 hover:text-neutral-900'
     }`;
 
-  const navTabsList: NavTab[] = ['home', 'chat', 'studio', 'workflows', 'tools', 'bots', 'settings'];
+  const navTabsList: NavTab[] = ['home', 'chat', 'studio', 'workflows', 'tools', 'bots', 'aethi-hub', 'settings'];
   const navRefs = React.useRef<Record<string, HTMLButtonElement | null>>({});
 
   const handleNavKeyDown = (e: React.KeyboardEvent, currentTab: NavTab) => {
@@ -271,6 +273,26 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   }`}
                 />
                 {!isCompact && <span>Automation Bots</span>}
+              </div>
+            </button>
+
+            <button
+              type="button"
+              ref={(el) => {
+                navRefs.current['aethi-hub'] = el;
+              }}
+              onClick={() => onSelectTab('aethi-hub')}
+              onKeyDown={(e) => handleNavKeyDown(e, 'aethi-hub')}
+              className={navBtnClass(activeTab === 'aethi-hub')}
+              title="Aethi Hub & Bot Control Center (Arrow keys to navigate)"
+            >
+              <div className="flex items-center gap-3">
+                <Bot
+                  className={`w-4 h-4 transition-transform group-hover:scale-110 ${
+                    activeTab === 'aethi-hub' ? (isDark ? 'text-red-400' : 'text-white') : 'text-neutral-400'
+                  }`}
+                />
+                {!isCompact && <span>Aethi Hub (Bot)</span>}
               </div>
             </button>
           </div>
