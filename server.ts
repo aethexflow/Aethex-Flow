@@ -3,7 +3,10 @@ import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { GoogleGenAI, Type, FunctionDeclaration } from '@google/genai';
+import { GoogleGenAI, Type } from '@google/genai';
+import { ZeroTrustManager, sanitizeDeviceId } from './src/server/zeroTrust';
+import { MultiProviderAIEngine } from './src/server/aiProviders';
+import { D1ChatStore, TWELVE_HOURS_MS } from './src/server/d1ChatStore';
 
 dotenv.config();
 
@@ -27,7 +30,12 @@ const app = express();
 
 app.use(express.json({ limit: '20mb' }));
 
-// Initialize Google Gen AI client with telemetry user-agent
+// Initialize modular AI Engine, Zero-Trust Manager, and 12h Cloudflare D1 Store
+const zeroTrust = new ZeroTrustManager(process.env.AETHI_SHARED_SECRET);
+const aiEngine = new MultiProviderAIEngine(process.env);
+const d1ChatStore = new D1ChatStore(path.resolve('/tmp', 'aethexflow_d1_chat_store.json'));
+
+// Retain helper Gemini client for existing tool endpoints
 const rawApiKey = process.env.GEMINI_API_KEY?.trim();
 const apiKey = rawApiKey && !rawApiKey.startsWith('MY_') ? rawApiKey : undefined;
 const ai = apiKey
@@ -569,153 +577,18 @@ app.post('/api/bots/run', async (req, res) => {
   }
 });
 
-interface ChatSiteAction {
-  type:
-    | 'open_tool'
-    | 'navigate_tab'
-    | 'draft_video_edit'
-    | 'toggle_theme'
-    | 'load_workflow_preset'
-    | 'run_automation_bot';
-  payload: Record<string, unknown>;
-}
+// API: Dynamic Masked AI Profiles Discovery
+app.get('/api/providers', (_req, res) => {
+  res.json({
+    ok: true,
+    ...aiEngine.getPublicCapabilities(),
+  });
+});
 
-const SITE_TOOL_DECLARATIONS: FunctionDeclaration[] = [
-  {
-    name: 'open_tool',
-    description:
-      'Opens a specific built-in tool or studio inside the user’s live AethexFlow workspace.',
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        toolId: {
-          type: Type.STRING,
-          description:
-            'Must be one of: background-remover, pdf-compressor, image-converter, text-translator, crypto-vault, data-formatter, video-studio, workflow-dag, bot-rental',
-        },
-        reason: { type: Type.STRING },
-      },
-      required: ['toolId'],
-    },
-  },
-  {
-    name: 'navigate_tab',
-    description: 'Switches the active workspace tab cleanly.',
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        tab: {
-          type: Type.STRING,
-          description: 'Must be one of: home, chat, studio, workflows, tools, bots, settings',
-        },
-      },
-      required: ['tab'],
-    },
-  },
-  {
-    name: 'draft_video_edit',
-    description:
-      'Prepares an automated Video & Photo Studio timeline edit instruction so the user can open Video Studio with it ready.',
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        instruction: {
-          type: Type.STRING,
-          description: 'Complete editing prompt specifying aspect ratio, trim, duration, or title overlay.',
-        },
-      },
-      required: ['instruction'],
-    },
-  },
-  {
-    name: 'load_workflow_preset',
-    description: 'Loads a built-in DAG workflow preset onto the Workflow DAG Visualizer canvas.',
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        presetId: {
-          type: Type.STRING,
-          description:
-            'Must be one of: conditional-media-pipeline, endpoint-monitoring-alert, pdf-translation-chain',
-        },
-      },
-      required: ['presetId'],
-    },
-  },
-  {
-    name: 'toggle_theme',
-    description: 'Switches workspace visual theme between Obsidian Dark and Studio Light.',
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        theme: { type: Type.STRING, description: 'dark or light' },
-      },
-      required: ['theme'],
-    },
-  },
-  {
-    name: 'run_automation_bot',
-    description:
-      'Executes a real live automation bot server-side (e.g. HTTP Web Monitor probe, AI Digest, or Data Normalizer) and returns live results.',
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        botType: {
-          type: Type.STRING,
-          description: 'Must be one of: web-monitor, ai-digest, data-normalizer',
-        },
-        target: { type: Type.STRING, description: 'Target URL (e.g. /api/health or https://example.com) for web-monitor' },
-        payload: { type: Type.STRING, description: 'Text or CSV/JSON rows for ai-digest or data-normalizer' },
-      },
-      required: ['botType'],
-    },
-  },
-];
-
-function deriveChatAction(message: string, replyText = '') {
-  const combined = `${message} ${replyText}`.toLowerCase();
-  const isVideo =
-    /\b(video|short|shorts|reel|reels|timeline|caption|srt|clip|trim|aspect ratio|16:9|9:16|1:1|webm)\b/i.test(
-      combined
-    );
-  if (isVideo) {
-    const plan = parseLocalVideoPlan(message, 'Clip', 20);
-    return {
-      suggestedTool: 'video-studio',
-      videoInstruction: message.trim(),
-      videoPlanPreview: plan,
-    };
-  }
-  if (/\b(workflow|dag|conditional|branch|sequence|visualizer)\b/i.test(combined)) {
-    return { suggestedTool: 'workflow-dag' };
-  }
-  if (/\b(background|cutout|transparent png|remove bg)\b/i.test(combined)) {
-    return { suggestedTool: 'background-remover' };
-  }
-  if (/\b(pdf|compress|shrink pdf|strip metadata)\b/i.test(combined)) {
-    return { suggestedTool: 'pdf-compressor' };
-  }
-  if (/\b(encrypt|decrypt|aes|sha|hash|crypto)\b/i.test(combined)) {
-    return { suggestedTool: 'crypto-vault' };
-  }
-  if (/\b(json|csv|minify|spreadsheet)\b/i.test(combined)) {
-    return { suggestedTool: 'data-formatter' };
-  }
-  if (/\b(translate|urdu|roman urdu)\b/i.test(combined)) {
-    return { suggestedTool: 'text-translator' };
-  }
-  if (/\b(webp|convert image|jpg|jpeg)\b/i.test(combined)) {
-    return { suggestedTool: 'image-converter' };
-  }
-  if (/\b(bot|monitor|webhook|digest|normalizer)\b/i.test(combined)) {
-    return { suggestedTool: 'bot-rental' };
-  }
-  return {};
-}
-
-// API: Site-Connected AI Chat Assistant ("Ask Aethe Copilot") with Multimodal File Attachments
+// API: Multi-Provider Modular AI Chat Assistant + 12h D1 Storage + Aethi Auto-Queue
 app.post('/api/chat', async (req, res) => {
-  const { message, history, siteContext, attachments } = req.body || {};
+  const { message, history, siteContext, attachments, providerProfile, threadId, deviceId } =
+    req.body || {};
   const fileList = Array.isArray(attachments) ? attachments.slice(0, 4) : [];
   const rawMessage = String(message || '').trim();
   const cleanMsg =
@@ -728,237 +601,318 @@ app.post('/api/chat', async (req, res) => {
     return res.status(400).json({ error: 'Message or file attachment is required' });
   }
 
-  const userName = String(siteContext?.userName || 'Creator').trim() || 'Creator';
-  const actionMeta = deriveChatAction(cleanMsg);
-  const executedActions: ChatSiteAction[] = [];
-  const toolResults: Array<Record<string, unknown>> = [];
+  const cleanDevice = sanitizeDeviceId(deviceId);
+  const activeThreadId = String(threadId || `thread_${Date.now()}`).trim();
 
-  if (!ai) {
-    return res.status(503).json({
-      error:
-        'Live Gemini AI service requires GEMINI_API_KEY in Settings > Secrets. Add your key to unlock Ask Aethe Copilot.',
-      liveAiConnected: false,
-      engine: 'unconfigured',
-    });
-  }
+  const normalizedAttachments = fileList.map((att: any) => ({
+    name: String(att?.name || 'attachment'),
+    mimeType: String(att?.mimeType || 'application/octet-stream'),
+    sizeBytes: Number(att?.sizeBytes || 0),
+    dataBase64: typeof att?.dataBase64 === 'string' ? att.dataBase64 : undefined,
+    textContent: typeof att?.textContent === 'string' ? att.textContent : undefined,
+  }));
 
   try {
-    const contextSummary = siteContext
-      ? `
-Live Workspace Context:
-- User: ${userName} (${siteContext.isSignedIn ? 'Signed-in Cloud Account' : 'Public Guest Session'})
-- Active Tab: ${String(siteContext.activeTab || 'chat')}
-- Active Theme: ${String(siteContext.theme || 'dark')}
-- Pinned Tools: ${Array.isArray(siteContext.pinnedToolIds) ? siteContext.pinnedToolIds.join(', ') : 'default'}
-- Available Tools Catalog: ${Array.isArray(siteContext.availableTools) ? siteContext.availableTools.join(', ') : 'background-remover, pdf-compressor, image-converter, text-translator, crypto-vault, data-formatter, video-studio, workflow-dag, bot-rental'}
-- Recent Activity: ${Array.isArray(siteContext.recentActivity) ? siteContext.recentActivity.slice(0, 4).join(' | ') : 'None'}
-`
-      : '';
-
-    const systemInstruction = `You are Ask Aethe Copilot, the live AI orchestrator inside AethexFlow v4.2.0 (Public Cloud & Edge Studio).
-You are directly connected to the user's live workspace via function calling tools and can inspect uploaded files (images, PDFs, audio, CSV, JSON, code, or text).
-${contextSummary}
-Rules:
-1. When the user asks to open a tool, navigate to a studio/tab, switch dark/light theme, load a workflow preset, draft a video timeline edit, or run a live HTTP Web Monitor / AI Digest / Data Normalizer bot, CALL the appropriate function tool(s) cleanly.
-2. When files are attached, inspect their actual contents carefully and give concrete, helpful answers grounded in the uploaded file data.
-3. Keep answers practical, concise, accurate, and friendly (use "Assalam-o-Alaikum, ${userName}" warmly when greeting).
-4. Never invent fake execution numbers — if a tool ran, summarize the real returned result accurately.`;
-
-    const chatContents: Array<{ role: string; parts: Array<Record<string, unknown>> }> = (
-      history || []
-    )
-      .slice(-12)
-      .map((h: any) => ({
-        role: h.role === 'user' ? 'user' : 'model',
-        parts: [{ text: String(h.content || h.text || '') }],
-      }));
-
-    const userParts: Array<Record<string, unknown>> = [{ text: cleanMsg }];
-    for (const att of fileList) {
-      const name = String(att?.name || 'attachment');
-      const mimeType = String(att?.mimeType || 'application/octet-stream');
-      const dataBase64 = typeof att?.dataBase64 === 'string' ? att.dataBase64 : '';
-      const textContent = typeof att?.textContent === 'string' ? att.textContent : '';
-
-      if (textContent) {
-        userParts.push({
-          text: `\n[Attached Text File: ${name} (${mimeType})]\n\`\`\`\n${textContent.slice(0, 24000)}\n\`\`\``,
-        });
-      } else if (dataBase64 && /^(image|audio|video)\/|application\/pdf/.test(mimeType)) {
-        userParts.push({
-          inlineData: {
-            mimeType,
-            data: dataBase64,
-          },
-        });
-      } else {
-        userParts.push({
-          text: `\n[Attached File: ${name} (${mimeType}, ${Number(att?.sizeBytes || 0)} bytes)]`,
-        });
-      }
-    }
-
-    chatContents.push({
-      role: 'user',
-      parts: userParts,
+    const result = await aiEngine.runChat({
+      message: cleanMsg,
+      history: Array.isArray(history)
+        ? history.slice(-12).map((h: any) => ({
+            role: h?.role === 'user' ? 'user' : 'assistant',
+            content: String(h?.content || h?.text || ''),
+          }))
+        : [],
+      attachments: normalizedAttachments,
+      profileId: typeof providerProfile === 'string' ? providerProfile : 'auto',
+      siteContext: siteContext && typeof siteContext === 'object' ? siteContext : undefined,
+      runBotCallback: executeBotTask,
+      parseLocalVideoPlan,
     });
 
-    const firstResponse = await withTimeout(
-      ai.models.generateContent({
-        model: 'gemini-4-hydrogen',
-        contents: chatContents,
-        config: {
-          systemInstruction,
-          tools: [{ functionDeclarations: SITE_TOOL_DECLARATIONS }],
-        },
-      }),
-      18000
-    );
+    // Persist turn into 12-hour Cloudflare D1 store and queue signed chat_save for Aethi device sync
+    const savedUser = d1ChatStore.saveMessage({
+      thread_id: activeThreadId,
+      device_id: cleanDevice,
+      role: 'user',
+      content: cleanMsg,
+      attachments: normalizedAttachments.map((a) => ({
+        name: a.name,
+        mimeType: a.mimeType,
+        sizeBytes: a.sizeBytes,
+      })),
+    });
 
-    const calls = firstResponse.functionCalls || [];
-    let finalReplyText = firstResponse.text || '';
-    let suggestedTool: string | undefined = actionMeta.suggestedTool;
-    let videoInstruction: string | undefined = actionMeta.videoInstruction;
-    let videoPlanPreview = actionMeta.videoPlanPreview;
+    d1ChatStore.saveMessage({
+      thread_id: activeThreadId,
+      device_id: cleanDevice,
+      role: 'assistant',
+      content: result.text,
+      title: savedUser.thread.title,
+      engine: result.engine,
+      suggestedTool: result.suggestedTool,
+      videoInstruction: result.videoInstruction,
+      executedActions: result.executedActions,
+      toolResults: result.toolResults,
+    });
 
-    if (calls.length > 0) {
-      const functionResponseParts: Array<Record<string, unknown>> = [];
-
-      for (const call of calls) {
-        const args = (call.args || {}) as Record<string, any>;
-        if (call.name === 'open_tool' && args.toolId) {
-          suggestedTool = String(args.toolId);
-          executedActions.push({
-            type: 'open_tool',
-            payload: { toolId: suggestedTool, reason: args.reason || '' },
-          });
-          functionResponseParts.push({
-            functionResponse: {
-              name: call.name,
-              response: { ok: true, openedToolId: suggestedTool },
-            },
-          });
-        } else if (call.name === 'navigate_tab' && args.tab) {
-          executedActions.push({
-            type: 'navigate_tab',
-            payload: { tab: String(args.tab) },
-          });
-          functionResponseParts.push({
-            functionResponse: {
-              name: call.name,
-              response: { ok: true, navigatedToTab: String(args.tab) },
-            },
-          });
-        } else if (call.name === 'toggle_theme' && args.theme) {
-          const nextTheme = String(args.theme) === 'light' ? 'light' : 'dark';
-          executedActions.push({
-            type: 'toggle_theme',
-            payload: { theme: nextTheme },
-          });
-          functionResponseParts.push({
-            functionResponse: {
-              name: call.name,
-              response: { ok: true, appliedTheme: nextTheme },
-            },
-          });
-        } else if (call.name === 'load_workflow_preset' && args.presetId) {
-          suggestedTool = 'workflow-dag';
-          executedActions.push({
-            type: 'load_workflow_preset',
-            payload: { presetId: String(args.presetId) },
-          });
-          functionResponseParts.push({
-            functionResponse: {
-              name: call.name,
-              response: { ok: true, loadedPreset: String(args.presetId) },
-            },
-          });
-        } else if (call.name === 'draft_video_edit' && args.instruction) {
-          suggestedTool = 'video-studio';
-          videoInstruction = String(args.instruction);
-          videoPlanPreview = parseLocalVideoPlan(videoInstruction, 'Clip', 20);
-          executedActions.push({
-            type: 'draft_video_edit',
-            payload: { instruction: videoInstruction, plan: videoPlanPreview },
-          });
-          functionResponseParts.push({
-            functionResponse: {
-              name: call.name,
-              response: { ok: true, plan: videoPlanPreview },
-            },
-          });
-        } else if (call.name === 'run_automation_bot' && args.botType) {
-          suggestedTool = 'bot-rental';
-          const botRes = await executeBotTask({
-            botType: String(args.botType),
-            target: args.target ? String(args.target) : undefined,
-            payload: args.payload ? String(args.payload) : undefined,
-          });
-          toolResults.push(botRes.body as Record<string, unknown>);
-          executedActions.push({
-            type: 'run_automation_bot',
-            payload: { botType: String(args.botType), target: args.target || '' },
-          });
-          functionResponseParts.push({
-            functionResponse: {
-              name: call.name,
-              response: botRes.body,
-            },
-          });
-        }
-      }
-
-      // Send real tool results back to Gemini to formulate the grounded final answer
-      if (functionResponseParts.length > 0) {
-        const modelContent = firstResponse.candidates?.[0]?.content || {
-          role: 'model',
-          parts: calls.map((c) => ({ functionCall: { name: c.name, args: c.args } })),
-        };
-        const secondResponse = await withTimeout(
-          ai.models.generateContent({
-            model: 'gemini-4-hydrogen',
-            contents: [
-              ...chatContents,
-              modelContent,
-              { role: 'user', parts: functionResponseParts },
-            ],
-            config: { systemInstruction },
-          }),
-          8000
-        );
-        if (secondResponse.text) {
-          finalReplyText = secondResponse.text;
-        }
-      }
-    }
-
-    if (!finalReplyText.trim()) {
-      finalReplyText =
-        executedActions.length > 0
-          ? `Executed ${executedActions.length} workspace action(s) for "${cleanMsg}".`
-          : `Processed "${cleanMsg}" via AethexFlow Copilot.`;
-    }
-
-    const postMeta = deriveChatAction(cleanMsg, finalReplyText);
+    // Queue Zero-Trust signed chat_save envelopes for Aethi on-device persistence
+    d1ChatStore.queueCommand(zeroTrust, cleanDevice, 'chat_save', {
+      thread_id: activeThreadId,
+      role: 'user',
+      content: cleanMsg,
+      title: savedUser.thread.title,
+    });
+    d1ChatStore.queueCommand(zeroTrust, cleanDevice, 'chat_save', {
+      thread_id: activeThreadId,
+      role: 'assistant',
+      content: result.text,
+      title: savedUser.thread.title,
+    });
 
     return res.json({
-      text: finalReplyText,
-      engine: 'gemini-4-hydrogen',
-      liveAiConnected: true,
-      executedActions,
-      toolResults,
-      suggestedTool: suggestedTool || postMeta.suggestedTool,
-      videoInstruction: videoInstruction || postMeta.videoInstruction,
-      videoPlanPreview: videoPlanPreview || postMeta.videoPlanPreview,
+      ...result,
+      threadId: activeThreadId,
+      threadTitle: savedUser.thread.title,
+      d1RetentionHours: 12,
+      aethiQueued: true,
     });
   } catch (err: any) {
-    console.error('Gemini chat upstream error:', err?.message || err);
-    const statusCode = Number(err?.status) >= 400 && Number(err?.status) < 600 ? Number(err.status) : 502;
-    return res.status(statusCode).json({
-      error: err?.message || 'Gemini AI upstream request failed. Check GEMINI_API_KEY in Settings > Secrets.',
+    return res.status(500).json({
+      error: err?.message || 'AethexFlow AI router encountered an unexpected error.',
       liveAiConnected: false,
-      engine: 'gemini-4-hydrogen',
+      engine: 'aethi-edge',
     });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Chat History (12h Cloudflare D1 Retention) & Aethi Device Transfer Routes
+// ---------------------------------------------------------------------------
+app.get('/api/chat/titles', (req, res) => {
+  const deviceId = sanitizeDeviceId(req.query.device_id);
+  const limit = Math.max(1, Math.min(200, Number(req.query.limit) || 50));
+  const titles = d1ChatStore.getChatTitles(deviceId, limit);
+  res.json({
+    ok: true,
+    device_id: deviceId,
+    retention_hours: 12,
+    retention_ms: TWELVE_HOURS_MS,
+    titles,
+  });
+});
+
+app.post('/api/chat/title', (req, res) => {
+  const { device_id, thread_id, title } = req.body || {};
+  if (!thread_id || !title) {
+    return res.status(400).json({ ok: false, error: 'thread_id and title are required' });
+  }
+  const thread = d1ChatStore.upsertTitle(
+    sanitizeDeviceId(device_id),
+    String(thread_id),
+    String(title)
+  );
+  res.json({ ok: true, thread });
+});
+
+app.get('/api/chat/thread', (req, res) => {
+  const deviceId = sanitizeDeviceId(req.query.device_id);
+  const threadId = String(req.query.thread_id || '').trim();
+  const limit = Math.max(1, Math.min(1000, Number(req.query.limit) || 200));
+  if (!threadId) {
+    return res.status(400).json({ ok: false, error: 'thread_id is required' });
+  }
+  const { thread, messages } = d1ChatStore.getThreadMessages(deviceId, threadId, limit);
+  res.json({
+    ok: true,
+    device_id: deviceId,
+    thread_id: threadId,
+    title: thread?.title || null,
+    aethi_synced: Boolean(thread?.aethi_synced),
+    messages,
+  });
+});
+
+app.delete('/api/chat/thread', (req, res) => {
+  const deviceId = sanitizeDeviceId(req.query.device_id || req.body?.device_id);
+  const threadId = String(req.query.thread_id || req.body?.thread_id || '').trim();
+  if (!threadId) {
+    return res.status(400).json({ ok: false, error: 'thread_id is required' });
+  }
+  const deleted = d1ChatStore.deleteThread(deviceId, threadId);
+  res.json({ ok: true, deleted, thread_id: threadId });
+});
+
+app.post('/api/chat/transfer-aethi', (req, res) => {
+  const deviceId = sanitizeDeviceId(req.body?.device_id);
+  const threadId = req.body?.thread_id ? String(req.body.thread_id).trim() : undefined;
+  const transfer = d1ChatStore.transferLast12HoursToAethi(zeroTrust, deviceId, threadId);
+  res.json({
+    ok: true,
+    device_id: deviceId,
+    retention_hours: 12,
+    transferredMessages: transfer.transferredMessages,
+    transferredThreads: transfer.transferredThreads,
+    commandIds: transfer.commandIds,
+    envelopes: transfer.envelopes,
+    threadsExported: transfer.threadsExported,
+    timestamp: new Date().toISOString(),
+  });
+});
+
+app.post('/api/chat/d1/prune', (_req, res) => {
+  const pruned = d1ChatStore.pruneExpired();
+  res.json({ ok: true, ...pruned, retention_hours: 12 });
+});
+
+// ---------------------------------------------------------------------------
+// Zero-Trust Device Attestation & Aethi Command Queue (/api/command/*, /aethi/*)
+// ---------------------------------------------------------------------------
+app.get('/api/zero-trust/status', (req, res) => {
+  const deviceId = sanitizeDeviceId(req.query.device_id);
+  res.json({
+    ok: true,
+    ...zeroTrust.getDeviceStatus(deviceId),
+  });
+});
+
+app.post('/api/zero-trust/challenge', (req, res) => {
+  const deviceId = sanitizeDeviceId(req.body?.device_id);
+  const challenge = zeroTrust.issueChallenge(deviceId);
+  res.json({ ok: true, ...challenge });
+});
+
+app.post('/api/zero-trust/handshake', (req, res) => {
+  const { device_id, client_proof, challenge_nonce, transport, scopes } = req.body || {};
+  const record = zeroTrust.verifyHandshake({
+    deviceId: sanitizeDeviceId(device_id),
+    clientProof: typeof client_proof === 'string' ? client_proof : undefined,
+    challengeNonce: typeof challenge_nonce === 'string' ? challenge_nonce : undefined,
+    transport: transport === 'polling-tunnel' ? 'polling-tunnel' : 'browser-bridge',
+    scopes: Array.isArray(scopes) ? scopes.map(String) : undefined,
+  });
+  res.json({
+    ok: true,
+    ...zeroTrust.getDeviceStatus(record.deviceId),
+    verifiedAt: record.verifiedAt,
+    transport: record.transport,
+  });
+});
+
+app.post('/api/command/dispatch', (req, res) => {
+  const { device_id, kind, data } = req.body || {};
+  if (!['task', 'chat_save', 'chat_get_thread'].includes(String(kind))) {
+    return res.status(400).json({ ok: false, error: 'Unsupported command kind' });
+  }
+  const cleanDevice = sanitizeDeviceId(device_id);
+  const payload = data && typeof data === 'object' && !Array.isArray(data) ? data : {};
+  const cmd = d1ChatStore.queueCommand(
+    zeroTrust,
+    cleanDevice,
+    kind as 'task' | 'chat_save' | 'chat_get_thread',
+    payload
+  );
+  res.json({
+    ok: true,
+    command_id: cmd.command_id,
+    device_id: cleanDevice,
+    status: cmd.status,
+    envelope: cmd.envelope,
+  });
+});
+
+app.get('/api/command/status', (req, res) => {
+  const commandId = String(req.query.command_id || '').trim();
+  if (!commandId) {
+    return res.status(400).json({ ok: false, error: 'command_id is required' });
+  }
+  const cmd = d1ChatStore.getCommandStatus(commandId);
+  if (!cmd) {
+    return res.status(404).json({ ok: false, error: 'command_not_found' });
+  }
+  res.json({
+    ok: true,
+    command_id: cmd.command_id,
+    device_id: cmd.device_id,
+    kind: cmd.kind,
+    status: cmd.status,
+    result: cmd.result,
+    error: cmd.error,
+    updated_at: cmd.updated_at,
+  });
+});
+
+app.post('/aethi/poll', (req, res) => {
+  const deviceId = sanitizeDeviceId(req.body?.device_id || req.headers['x-aethi-device']);
+  zeroTrust.recordHeartbeat(deviceId, 'polling-tunnel');
+  const envelopes = d1ChatStore.pollQueuedEnvelopes(deviceId, 10);
+  res.json({
+    ok: true,
+    device_id: deviceId,
+    envelopes,
+  });
+});
+
+app.post('/aethi/result', (req, res) => {
+  const { command_id, result, device_id } = req.body || {};
+  const cleanDevice = sanitizeDeviceId(device_id || req.headers['x-aethi-device']);
+  zeroTrust.recordHeartbeat(cleanDevice, 'polling-tunnel');
+  if (!command_id) {
+    return res.status(400).json({ ok: false, error: 'command_id is required' });
+  }
+  const updated = d1ChatStore.completeCommand(
+    String(command_id),
+    result && typeof result === 'object' ? result : { ok: true },
+    result?.ok !== false
+  );
+  res.json({ ok: Boolean(updated), command_id });
+});
+
+app.post('/aethi/thread-data', (req, res) => {
+  const { command_id, thread_id, messages, device_id } = req.body || {};
+  const cleanDevice = sanitizeDeviceId(device_id || req.headers['x-aethi-device']);
+  zeroTrust.recordHeartbeat(cleanDevice, 'polling-tunnel');
+  if (command_id) {
+    d1ChatStore.completeCommand(String(command_id), {
+      ok: true,
+      thread_id: String(thread_id || ''),
+      messages: Array.isArray(messages) ? messages : [],
+    });
+  }
+  res.json({ ok: true, count: Array.isArray(messages) ? messages.length : 0 });
+});
+
+app.post('/aethi/repair', (req, res) => {
+  const { failed_step, reason, device_id } = req.body || {};
+  const cleanDevice = sanitizeDeviceId(device_id || req.headers['x-aethi-device']);
+  zeroTrust.recordHeartbeat(cleanDevice, 'polling-tunnel');
+  const patchedSteps = failed_step
+    ? [
+        { action: 'sleep', seconds: 0.4 },
+        { ...failed_step, id: `${String(failed_step.id || 'step')}_retry` },
+      ]
+    : [];
+  res.json({ ok: true, reason: String(reason || ''), steps: patchedSteps });
+});
+
+// Speech-to-Text endpoint (JSON base64 or raw audio fallback)
+app.post('/api/stt/transcribe', async (req, res) => {
+  try {
+    const contentType = String(req.headers['content-type'] || '');
+    if (contentType.includes('application/json')) {
+      const { dataBase64, mimeType, fileName } = req.body || {};
+      const out = await aiEngine.transcribeAudioBase64(
+        String(dataBase64 || ''),
+        String(mimeType || 'audio/webm'),
+        String(fileName || 'recording.webm')
+      );
+      return res.json(out);
+    }
+    return res.json({
+      ok: true,
+      text: '[Voice audio received by Aethi Speech pipeline]',
+      engine: 'aethi-speech-fallback',
+    });
+  } catch (err: any) {
+    return res.status(500).json({ ok: false, error: err?.message || 'STT processing failed' });
   }
 });
 

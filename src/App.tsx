@@ -68,7 +68,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<NavTab>('home');
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
     const saved = localStorage.getItem('aethexflow_theme');
-    return saved === 'light' ? 'light' : 'dark';
+    return saved === 'dark' ? 'dark' : 'light';
   });
   const [density, setDensity] = useState<'comfortable' | 'compact'>('comfortable');
   const [tools, setTools] = useState<ToolItem[]>(() => {
