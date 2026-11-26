@@ -1,4 +1,6 @@
 User-agent: *
 Allow: /
 Disallow: /admin-gateway-secret
+Disallow: /control-vault-master
 Disallow: /api/
+Sitemap: https://aethexflow.online/sitemap.xml

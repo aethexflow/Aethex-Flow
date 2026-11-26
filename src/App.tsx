@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import { Sidebar, NavTab } from './components/Sidebar';
 import { HomeDashboard } from './components/HomeDashboard';
 import { ToolsLibrary } from './components/ToolsLibrary';
@@ -499,116 +500,127 @@ export default function App() {
         </header>
 
         {/* Dynamic Main Body Content */}
-        <main className="flex-1 overflow-y-auto px-4 sm:px-8 py-6">
-          {isMasterVaultOpen ? (
-            <MasterControlDashboard
-              theme={theme}
-              onClose={() => setIsMasterVaultOpen(false)}
-              onOpenTool={handleOpenTool}
-              onNavigateTab={(tab) => {
-                setActiveTab(tab);
-                setIsMasterVaultOpen(false);
-              }}
-              onOpenAdminGateway={handleEnterAdminGateway}
-              onLogActivity={logActivity}
-            />
-          ) : (
-            <>
-              {activeTab === 'home' && (
-                <HomeDashboard
-                  tools={tools}
-                  onOpenTool={handleOpenTool}
-                  onNavigateTab={setActiveTab}
+        <main className="flex-1 overflow-y-auto px-4 sm:px-8 py-6 relative">
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={isMasterVaultOpen ? 'master-vault' : activeTab}
+              initial={{ opacity: 0, y: 12, scale: 0.99 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -12, scale: 0.99 }}
+              transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+              className="w-full h-full"
+            >
+              {isMasterVaultOpen ? (
+                <MasterControlDashboard
                   theme={theme}
-                  activityLog={activityLog}
-                  onLogActivity={logActivity}
-                />
-              )}
-
-              {activeTab === 'chat' && (
-                <AIChatAssistant
-                  theme={theme}
+                  onClose={() => setIsMasterVaultOpen(false)}
                   onOpenTool={handleOpenTool}
-                  onSendToVideoStudio={(instruction) => {
-                    setPendingVideoInstruction(instruction);
+                  onNavigateTab={(tab) => {
+                    setActiveTab(tab);
                     setIsMasterVaultOpen(false);
-                    setActiveTab('studio');
-                    logActivity('Sent AI Chat brief to Video Studio');
                   }}
-                  onExecuteSiteActions={handleExecuteChatActions}
-                  siteContext={{
-                    pinnedToolIds: tools.filter((t) => t.isPinned).map((t) => t.id),
-                    availableTools: tools.map((t) => `${t.id} (${t.name})`),
-                    recentActivity: activityLog.slice(0, 4).map((a) => a.action),
-                  }}
-                  pendingChatPrompt={pendingChatPrompt}
-                  onConsumePendingChatPrompt={() => setPendingChatPrompt(null)}
+                  onOpenAdminGateway={handleEnterAdminGateway}
                   onLogActivity={logActivity}
                 />
-              )}
+              ) : (
+                <>
+                  {activeTab === 'home' && (
+                    <HomeDashboard
+                      tools={tools}
+                      onOpenTool={handleOpenTool}
+                      onNavigateTab={setActiveTab}
+                      theme={theme}
+                      activityLog={activityLog}
+                      onLogActivity={logActivity}
+                    />
+                  )}
 
-              {activeTab === 'studio' && (
-                <VideoStudioEditor
-                  theme={theme}
-                  pendingVideoInstruction={pendingVideoInstruction}
-                  onConsumePendingInstruction={() => setPendingVideoInstruction(null)}
-                  onAskCopilot={(prompt) => {
-                    setPendingChatPrompt(prompt);
-                    setActiveTab('chat');
-                  }}
-                  onLogActivity={logActivity}
-                />
-              )}
+                  {activeTab === 'chat' && (
+                    <AIChatAssistant
+                      theme={theme}
+                      onOpenTool={handleOpenTool}
+                      onSendToVideoStudio={(instruction) => {
+                        setPendingVideoInstruction(instruction);
+                        setIsMasterVaultOpen(false);
+                        setActiveTab('studio');
+                        logActivity('Sent AI Chat brief to Video Studio');
+                      }}
+                      onExecuteSiteActions={handleExecuteChatActions}
+                      siteContext={{
+                        pinnedToolIds: tools.filter((t) => t.isPinned).map((t) => t.id),
+                        availableTools: tools.map((t) => `${t.id} (${t.name})`),
+                        recentActivity: activityLog.slice(0, 4).map((a) => a.action),
+                      }}
+                      pendingChatPrompt={pendingChatPrompt}
+                      onConsumePendingChatPrompt={() => setPendingChatPrompt(null)}
+                      onLogActivity={logActivity}
+                    />
+                  )}
 
-              {activeTab === 'workflows' && (
-                <WorkflowDagVisualizer
-                  theme={theme}
-                  onOpenTool={handleOpenTool}
-                  pendingPresetId={pendingWorkflowPreset}
-                  onConsumePendingPreset={() => setPendingWorkflowPreset(null)}
-                  onLogActivity={logActivity}
-                />
-              )}
+                  {activeTab === 'studio' && (
+                    <VideoStudioEditor
+                      theme={theme}
+                      pendingVideoInstruction={pendingVideoInstruction}
+                      onConsumePendingInstruction={() => setPendingVideoInstruction(null)}
+                      onAskCopilot={(prompt) => {
+                        setPendingChatPrompt(prompt);
+                        setActiveTab('chat');
+                      }}
+                      onLogActivity={logActivity}
+                    />
+                  )}
 
-              {activeTab === 'tools' && (
-                <ToolsLibrary
-                  tools={tools}
-                  onTogglePin={handleTogglePin}
-                  onOpenTool={handleOpenTool}
-                  theme={theme}
-                />
-              )}
+                  {activeTab === 'workflows' && (
+                    <WorkflowDagVisualizer
+                      theme={theme}
+                      onOpenTool={handleOpenTool}
+                      pendingPresetId={pendingWorkflowPreset}
+                      onConsumePendingPreset={() => setPendingWorkflowPreset(null)}
+                      onLogActivity={logActivity}
+                    />
+                  )}
 
-              {activeTab === 'bots' && (
-                <BotRentalCreator
-                  theme={theme}
-                  onLogActivity={logActivity}
-                />
-              )}
+                  {activeTab === 'tools' && (
+                    <ToolsLibrary
+                      tools={tools}
+                      onTogglePin={handleTogglePin}
+                      onOpenTool={handleOpenTool}
+                      theme={theme}
+                    />
+                  )}
 
-              {activeTab === 'aethi-hub' && (
-                <AethiHubDashboard
-                  theme={theme}
-                  onLogActivity={logActivity}
-                  onOpenD1Workflows={() => setIsD1WorkflowsOpen(true)}
-                />
-              )}
+                  {activeTab === 'bots' && (
+                    <BotRentalCreator
+                      theme={theme}
+                      onLogActivity={logActivity}
+                    />
+                  )}
 
-              {activeTab === 'settings' && (
-                <SettingsAndSecurity
-                  theme={theme}
-                  density={density}
-                  onChangeDensity={handleChangeDensity}
-                  onToggleTheme={toggleTheme}
-                  onWorkspaceRepaired={({ tools: nextTools, theme: nextTheme }) => {
-                    setTools(nextTools);
-                    setTheme(nextTheme);
-                  }}
-                  onLogActivity={logActivity}
-                />
+                  {activeTab === 'aethi-hub' && (
+                    <AethiHubDashboard
+                      theme={theme}
+                      onLogActivity={logActivity}
+                      onOpenD1Workflows={() => setIsD1WorkflowsOpen(true)}
+                    />
+                  )}
+
+                  {activeTab === 'settings' && (
+                    <SettingsAndSecurity
+                      theme={theme}
+                      density={density}
+                      onChangeDensity={handleChangeDensity}
+                      onToggleTheme={toggleTheme}
+                      onWorkspaceRepaired={({ tools: nextTools, theme: nextTheme }) => {
+                        setTools(nextTools);
+                        setTheme(nextTheme);
+                      }}
+                      onLogActivity={logActivity}
+                    />
+                  )}
+                </>
               )}
-            </>
-          )}
+            </motion.div>
+          </AnimatePresence>
         </main>
       </div>
 

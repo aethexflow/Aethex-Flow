@@ -1049,8 +1049,10 @@ export const VideoStudioEditor: React.FC<VideoStudioEditorProps> = ({
     <div className="space-y-4 max-w-[1440px] mx-auto animate-in fade-in duration-300">
       {/* Studio Top Bar */}
       <div
-        className={`p-3 sm:px-5 rounded-2xl border flex flex-wrap items-center justify-between gap-3 ${
-          isDark ? 'bg-[#12141c] border-neutral-800' : 'bg-white border-neutral-200 shadow-sm'
+        className={`p-3 sm:px-5 rounded-2xl border backdrop-blur-xl flex flex-wrap items-center justify-between gap-3 shadow-lg ${
+          isDark
+            ? 'bg-[#12141c]/75 border-neutral-800/80 shadow-black/40'
+            : 'bg-white/85 border-neutral-200/80 shadow-neutral-200/50'
         }`}
       >
         <div className="flex items-center gap-3">
